@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+
+    <title>Markdown to Medium</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Markdown to Medium</h1>
+      <label for="postTitle">Post title</label>
+      <div class="input-group">
+        <input type="text" class="form-control" id="postTitle" required>
+        <div class="invalid-feedback">
+          Choose post title
+        </div>
+      </div>
+      <label for="markdownText">Post markdown</label>
+      <div class="input-group">
+        <textarea class="form-control" id="markdownText" aria-label="Post in Markdown" rows=10></textarea>
+        <div class="invalid-feedback">
+          Provide post contents in markdown
+        </div>
+      </div>
+      <label for="apiKey">Medium API key</label>
+      <div class="input-group">
+        <input type="text" class="form-control" id="apiKey" maxlength="65">
+        <div class="invalid-feedback">
+          Provide your Medium API key: 65 characters containing numbers 0-9 and letters a-f
+        </div>
+      </div>
+      <label for="corsProxy">CORS proxy</label>
+      <div class="input-group">
+        <input type="url" class="form-control" id="corsProxy" value="https://cors.root.workers.dev/">
+        <div class="invalid-feedback">
+          Need to use a CORS proxy: you can use https://cors.root.workers.dev/ if you don't have one
+        </div>
+      </div>
+      <p></p>
+      <p>
+      <div class="alert d-none" role="alert">
+      </div>
+      <button type="button" class="btn btn-primary" id="convertBtn" onclick="tryPost(this)">
+        <span class="spinner-border spinner-border-sm d-none" id="convertSpin" role="status" aria-hidden="true"></span>
+        Convert
+      </button>
+      <button type="button" class="btn btn-outline-secondary" data-toggle="collapse" data-target="#collapseLog">
+        Show log
+      </button>
+      </p>
+      <div class="collapse" id="collapseLog">
+        <div class="input-group">
+          <textarea class="form-control" id="logText" aria-label="Post in Markdown" rows=5 readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.4.1.slim.min.js" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js" integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" crossorigin="anonymous"></script>
+  <script>
+  function tryPost(btn) {
+    $('.alert').addClass("d-none");
+    $('.alert').removeClass("alert-danger");
+    $('.alert').removeClass("alert-success");
+    if (!validate()) return;
+
+    $( btn ).prop("disabled", true);
+    $( btn ).html($( btn ).html().replace("Convert", "Converting..."));
+    $( btn ).children("span").removeClass('d-none');
+    clearLog();
+    appendLog("Getting Medium user ID...");
+    auth = $('#apiKey').prop("value")
+
+    proxyFetch("https://cors.root.workers.dev/", "https://api.medium.com/v1/me", {
+      method: "get",
+      headers: {
+        "Authorization": "Bearer " + auth,
+        "Content-type": "application/json",
+        "Accept": "application/json",
+        "Accept-Charset": "utf-8",
+      }
+    }).then(response => status(response, gotId, "Failed to retrieve user id")).catch(_ => error("Failed to contact the API"));
+  }
+
+  function markValid(item, isValid) {
+    if (isValid) {
+      item.addClass('is-valid');
+      item.removeClass('is-invalid');
+    } else {
+      item.addClass('is-invalid');
+      item.removeClass('is-valid');
+    }
+  }
+
+  function validate() {
+    markValid($('#postTitle'), $('#postTitle').prop("value") !== "");
+    markValid($('#markdownText'), $('#markdownText').prop("value") !== "");
+    markValid($('#apiKey'), $('#apiKey').prop("value").match("[A-fa-f0-9]{65}"));
+    markValid($('#corsProxy'), $('#corsProxy').prop("value") !== "" && $('#corsProxy').prop("validity").valid);
+
+    return $('.is-invalid').length == 0;
+  }
+
+  function proxyFetch(proxyurl, url, init) {
+    init['headers']['X-Corsify-Url'] = url;
+    init['mode'] = 'cors'
+
+    return fetch(proxyurl, init)
+  }
+
+  function error(err) {
+    appendLog(err);
+    $('.alert').html(err);
+    $('.alert').addClass("alert-danger");
+    $('.alert').removeClass("d-none");
+    reset();
+  }
+
+  function status(response, next, err) {
+    if (response.status >= 200 && response.status < 300) {
+      response.json().then(next);
+    } else {
+      let status = response.status;
+      if (status == 401)
+        status = "unauthorized";
+      error("Failed to retrieve user id: " + status);
+    }
+  }
+
+  function gotId(data) {
+    if ("data" in data) {
+      if ("id" in data['data'] && "username" in data['data']) {
+        appendLog("Publishing for user " + data['data']['username'] + "...");
+        createPost(data['data']['id']);
+        return;
+      }
+    }
+
+    error("Invalid response from the API");
+  }
+
+  function createPost(id) {
+    let postUrl = "https://api.medium.com/v1/users/" + id + "/posts";
+    let postData = {
+      "title": $('#postTitle').prop("value"),
+      "contentFormat": "markdown",
+      "content": $('#markdownText').prop("value"),
+      "publishStatus": "draft",
+    }
+
+    proxyFetch("https://cors.root.workers.dev/", postUrl, {
+      method: "post",
+      headers: {
+        "Authorization": "Bearer " + $('#apiKey').prop("value"),
+        "Content-type": "application/json",
+        "Accept": "application/json",
+        "Accept-Charset": "utf-8",
+      },
+      body: JSON.stringify(postData),
+    }).then(response => status(response, gotPostData, "Failed to publish the post")).catch(_ => error("Failed to contact the API"));
+  }
+
+  function doSuccess(title, postUrl) {
+    appendLog("Published " + title + " at " + postUrl);
+    $('.alert').html('Published <strong>' + title + '</strong> at <a href="' + postUrl + '" class="alert-link">' + postUrl + '</a>');
+    $('.alert').addClass("alert-success");
+    $('.alert').removeClass("d-none");
+  }
+
+  function gotPostData(data) {
+    if ("data" in data) {
+      if ("title" in data['data'] && "url" in data['data']) {
+        doSuccess(data['data']['title'], data['data']['url']);
+        reset();
+        return;
+      }
+    }
+
+    error("Invalid response from the API");
+  }
+
+  function appendLog(str) {
+    document.getElementById("logText").value += str + "\n";
+  }
+
+  function clearLog() {
+    document.getElementById("logText").value = "";
+  }
+
+  function reset() {
+    let btn = $('#convertBtn');
+    btn.html(btn.html().replace("Converting...", "Convert"));
+    btn.children("span").addClass('d-none');
+    btn.prop("disabled", false);
+  }
+  </script>
+  </body>
+</html>
